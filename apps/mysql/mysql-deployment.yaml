@@ -69,7 +69,7 @@ spec:
     spec:
       containers:
       - name: mysql
-        image: mysql:8.0 # 使用官方镜像
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/mysql:8.0 # 使用华为云 SWR 镜像（无需 Docker Hub 认证）
         imagePullPolicy: IfNotPresent
         env:
         - name: MYSQL_ROOT_PASSWORD

@@ -175,12 +175,75 @@ choose_mode() {
             fi
             LLM_API_KEY="${api_key}"
             info "模式: 外部 API (${LLM_MODEL} @ ${LLM_API_URL})"
+            check_api_health
             ;;
         *)
             err "无效选择"
             exit 1
             ;;
     esac
+}
+
+# ---- 3.5 健康检查：验证 API 连通性 ----
+check_api_health() {
+    if [ "${DEPLOY_MODE}" != "api" ] || [ -z "${LLM_API_URL}" ]; then
+        return
+    fi
+
+    step "验证 API 连通性"
+
+    local test_url="${LLM_API_URL}"
+    local api_url_lower
+    api_url_lower="$(echo "${LLM_API_URL}" | tr '[:upper:]' '[:lower:]')"
+
+    # OpenAI 兼容接口一般有 /v1/models 或 /v1/chat/completions
+    # 优先用 /v1/models (轻量)，否则用原 URL 发一个最小请求
+    if echo "${api_url_lower}" | grep -q "/v1/chat/completions$"; then
+        test_url="$(echo "${LLM_API_URL}" | sed 's|/v1/chat/completions$|/v1/models|')"
+    fi
+
+    info "正在测试 API 连接: ${test_url}"
+
+    local http_code
+    local resp_body
+    resp_body=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+        -H "Content-Type: application/json" \
+        ${LLM_API_KEY:+-H "Authorization: Bearer ${LLM_API_KEY}"} \
+        "${test_url}" 2>/dev/null || true)
+    http_code="${resp_body}"
+
+    if [ "${http_code}" -ge 200 ] && [ "${http_code}" -lt 500 ]; then
+        info "API 连接成功 (HTTP ${http_code}) ✓"
+        return
+    fi
+
+    # 如果 /v1/models 不行，尝试用原 URL 发一个空消息请求
+    if [ "${test_url}" != "${LLM_API_URL}" ]; then
+        warn "/v1/models 返回 HTTP ${http_code}，尝试直接连接原始 URL..."
+        resp_body=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+            -H "Content-Type: application/json" \
+            ${LLM_API_KEY:+-H "Authorization: Bearer ${LLM_API_KEY}"} \
+            -d '{"messages":[{"role":"user","content":"hi"}],"model":"test"}' \
+            "${LLM_API_URL}" 2>/dev/null || true)
+        http_code="${resp_body}"
+    fi
+
+    if [ "${http_code}" -ge 200 ] && [ "${http_code}" -lt 500 ]; then
+        info "API 连接成功 (HTTP ${http_code}) ✓"
+        return
+    fi
+
+    warn "API 连接异常 (HTTP ${http_code})，可能原因："
+    echo "    - API URL 不正确"
+    echo "    - API Key 无效或未提供"
+    echo "    - 网络无法访问"
+    echo ""
+    read -r -p "  是否继续部署？(y/N): " continue_choice
+    if [ "${continue_choice}" != "y" ] && [ "${continue_choice}" != "Y" ]; then
+        info "取消部署"
+        exit 0
+    fi
+    warn "跳过健康检查结果继续部署"
 }
 
 # ---- 4. 准备镜像 ----
