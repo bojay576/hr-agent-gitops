@@ -3,6 +3,7 @@ FROM golang:1.25-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY main.go ./
+COPY frontend/ ./frontend/
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/ai-gateway .
 
 FROM gcr.io/distroless/static-debian12:nonroot

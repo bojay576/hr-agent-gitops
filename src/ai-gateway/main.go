@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,9 @@ import (
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
 )
+
+//go:embed frontend/*
+var frontendFS embed.FS
 
 const defaultListenAddr = ":3000"
 const maxToolRounds = 4
@@ -81,10 +85,11 @@ func main() {
 	client := &http.Client{Timeout: 120 * time.Second}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /", frontendHandler)
+	mux.HandleFunc("GET /healthz", statusHandler(cfg))
+	mux.HandleFunc("POST /chat", chatHandler(cfg, client, false))
+	mux.HandleFunc("POST /v1/chat/completions", chatHandler(cfg, client, true))
 	mux.HandleFunc("/", statusHandler(cfg))
-	mux.HandleFunc("/healthz", statusHandler(cfg))
-	mux.HandleFunc("/chat", chatHandler(cfg, client, false))
-	mux.HandleFunc("/v1/chat/completions", chatHandler(cfg, client, true))
 
 	addr := envOrDefault("LISTEN_ADDR", defaultListenAddr)
 	log.Printf("AI Gateway listening on %s with provider=%s model=%s api_url=%s", addr, cfg.Provider, cfg.Model, cfg.APIURL)
@@ -133,6 +138,16 @@ func statusHandler(cfg config) http.HandlerFunc {
 			"mcp_server": cfg.MCPURL,
 		})
 	}
+}
+
+func frontendHandler(w http.ResponseWriter, r *http.Request) {
+	data, err := frontendFS.ReadFile("frontend/index.html")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "frontend not found")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(data)
 }
 
 func chatHandler(cfg config, client *http.Client, openAICompatible bool) http.HandlerFunc {
