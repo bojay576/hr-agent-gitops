@@ -115,6 +115,18 @@ curl -s http://127.0.0.1:30080/v1/chat/completions \
 
 AI Gateway 会把这两个工具提供给支持 tool/function calling 的 LLM。
 
+## 连接自定义数据库
+
+本项目支持动态连接到任意 MySQL 数据库，不需要改代码或重新部署。
+
+在对话中输入：
+
+> 连接到我的数据库 root:mypass@tcp(192.168.1.100:3306)/mydb
+
+AI 会自动调用 `connect_database` 工具完成连接切换。切换后即可对该数据库进行对话式增删改查。
+
+> **安全提示**：生产环境建议创建只读或限定库的 MySQL 用户，避免 LLM 误操作删除数据。
+
 ## 常用命令
 
 ```bash
