@@ -485,9 +485,15 @@ print_status() {
     # 尝试获取节点 IP
     local node_ip
     node_ip=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "<node-ip>")
-    echo "🔗 访问 AI Gateway:"
-    echo "   curl http://${node_ip}:30080"
-    echo ""
+	    echo "🔗 访问方式:"
+	    echo "   前端界面:  http://${node_ip}:30080"
+	    echo "   API 接口:  http://${node_ip}:30080/chat"
+	    echo "   健康检查:  http://${node_ip}:30080/healthz"
+	    echo ""
+	    echo "📋 端口转发（本地开发环境推荐）:"
+	    echo "   kubectl port-forward -n ${NAMESPACE} svc/ai-gateway-service 30080:3000"
+	    echo "   然后浏览器打开 http://127.0.0.1:30080"
+	    echo ""
 
     echo "📋 常用命令:"
     echo "   kubectl logs -n ${NAMESPACE} deploy/ai-gateway    # AI Gateway 日志"

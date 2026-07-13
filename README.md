@@ -68,13 +68,25 @@ kubectl exec -n "$NAMESPACE" deploy/mysql -- mysqldump -u root -p"$MYSQL_ROOT_PA
 
 Service 使用 NodePort `30080` 暴露 AI Gateway。
 
-在 macOS minikube Docker driver 下，推荐使用端口转发：
+### 前端界面（浏览器）
+
+直接在浏览器打开：
+
+```text
+http://<节点IP>:30080
+```
+
+在本地开发环境（minikube 等），推荐使用端口转发：
 
 ```bash
 kubectl port-forward -n mcp-services svc/ai-gateway-service 30080:3000
 ```
 
-然后访问：
+然后浏览器打开 [http://127.0.0.1:30080](http://127.0.0.1:30080)
+
+### API 接口
+
+健康检查：
 
 ```bash
 curl http://127.0.0.1:30080/healthz
@@ -95,13 +107,6 @@ curl -s http://127.0.0.1:30080/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"Engineering 部门有哪些员工？"}]}'
 ```
-
-> **关于前端界面**：本项目目前不包含独立的前端 UI 界面。`ai-gateway` 是 Go 语言编写的 API 后端网关，提供 RESTful 和 OpenAI 兼容的 HTTP 接口。
->
-> 可以通过以下方式与此系统交互：
-> - 直接调用 `/chat` 或 `/v1/chat/completions` API（如上示例）
-> - 对接任意 OpenAI 兼容客户端（如 ChatBox、NextChat、Open WebUI 等）
-> - 自行开发前端页面，调用上述 API 即可
 
 ## MCP 工具
 
