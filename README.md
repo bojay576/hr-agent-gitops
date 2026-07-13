@@ -45,36 +45,23 @@ MCP_IMAGE=ghcr.io/bojay576/mcp-hr-server:latest
 GATEWAY_IMAGE=ghcr.io/bojay576/ai-gateway:latest
 ```
 
-## 卸载 / 回退
-
-部署脚本不包含卸载功能。如需移除所有资源，请手动执行：
+## 卸载
 
 ```bash
-# 删除整个命名空间（会删除所有相关资源）
-NAMESPACE="${NAMESPACE:-mcp-services}"
-kubectl delete namespace "$NAMESPACE"
-
-# 如需保留命名空间仅删除单个资源：
-# kubectl delete -n "$NAMESPACE" deploy/ai-gateway deploy/mcp-hr-server deploy/mysql deploy/ollama
-# kubectl delete -n "$NAMESPACE" svc/ai-gateway-service svc/mcp-server-service svc/mysql-service svc/ollama-service
-# kubectl delete -n "$NAMESPACE" pvc/mysql-pvc pvc/ollama-pvc
-# kubectl delete -n "$NAMESPACE" secret/mysql-secret secret/mcp-server-secret secret/gateway-llm-secret
-# kubectl delete -n "$NAMESPACE" configmap/mysql-init-scripts
+./uninstall.sh
 ```
 
-如果需要保留数据（PVC 中的数据），删除命名空间前先备份：
+脚本会：
+1. 检查集群连接和命名空间是否存在
+2. 列出命名空间内的所有资源
+3. 如有持久数据（PVC），提供备份选项
+4. 确认后一键删除整个命名空间（清理所有资源）
+
+如需保留数据，卸载前可手动备份：
 
 ```bash
 NAMESPACE="${NAMESPACE:-mcp-services}"
-
-# 1. 备份 MySQL 数据（可选）
 kubectl exec -n "$NAMESPACE" deploy/mysql -- mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" hr_db > hr_db_backup.sql
-
-# 2. 删除命名空间（PVC 会随之删除）
-kubectl delete namespace "$NAMESPACE"
-
-# 3. 如需恢复：重新部署后导入备份
-# kubectl exec -i -n "$NAMESPACE" deploy/mysql -- mysql -u root -p"$MYSQL_ROOT_PASSWORD" hr_db < hr_db_backup.sql
 ```
 
 ## 访问
