@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -61,13 +62,11 @@ func listSchemaHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.C
 // --- 工具 2: 执行 SQL 查询 ---
 // AI 生成 SQL 后，通过这个工具在数据库真正执行
 func queryHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// 修正点：先将 Arguments 断言为 map 类型
 	args, ok := request.Params.Arguments.(map[string]interface{})
 	if !ok {
 		return mcp.NewToolResultError("Invalid arguments format"), nil
 	}
 
-	// 然后再从 map 中获取 query
 	query, ok := args["query"].(string)
 	if !ok {
 		return mcp.NewToolResultError("Query argument missing"), nil
@@ -75,41 +74,65 @@ func queryHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallTo
 
 	log.Printf("Executing SQL: %s", query)
 
-	rows, err := db.Query(query)
+	// 判断是否是写操作（INSERT/UPDATE/DELETE等）
+	// 写操作用 db.Exec 执行并返回影响行数
+	// 读操作用 db.Query 返回结果集
+	queryTrimmed := strings.TrimSpace(query)
+	queryUpper := strings.ToUpper(queryTrimmed)
+
+	if strings.HasPrefix(queryUpper, "SELECT") || strings.HasPrefix(queryUpper, "SHOW") || strings.HasPrefix(queryUpper, "DESCRIBE") || strings.HasPrefix(queryUpper, "DESC") || strings.HasPrefix(queryUpper, "EXPLAIN") {
+		// 读操作
+		rows, err := db.Query(query)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("SQL Error: %v", err)), nil
+		}
+		defer rows.Close()
+
+		columns, _ := rows.Columns()
+		result := []map[string]interface{}{}
+
+		for rows.Next() {
+			values := make([]interface{}, len(columns))
+			valuePtrs := make([]interface{}, len(columns))
+			for i := range values {
+				valuePtrs[i] = &values[i]
+			}
+
+			rows.Scan(valuePtrs...)
+
+			rowMap := make(map[string]interface{})
+			for i, col := range columns {
+				var v interface{}
+				val := values[i]
+				b, ok := val.([]byte)
+				if ok {
+					v = string(b)
+				} else {
+					v = val
+				}
+				rowMap[col] = v
+			}
+			result = append(result, rowMap)
+		}
+
+		jsonBytes, _ := json.Marshal(result)
+		return mcp.NewToolResultText(string(jsonBytes)), nil
+	}
+
+	// 写操作（INSERT, UPDATE, DELETE, ALTER, CREATE, DROP, TRUNCATE）
+	result, err := db.Exec(query)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("SQL Error: %v", err)), nil
 	}
-	defer rows.Close()
 
-	columns, _ := rows.Columns()
-	result := []map[string]interface{}{}
-
-	for rows.Next() {
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-		
-		rows.Scan(valuePtrs...)
-		
-		rowMap := make(map[string]interface{})
-		for i, col := range columns {
-			var v interface{}
-			val := values[i]
-			b, ok := val.([]byte)
-			if ok {
-				v = string(b)
-			} else {
-				v = val
-			}
-			rowMap[col] = v
-		}
-		result = append(result, rowMap)
+	affected, _ := result.RowsAffected()
+	lastID, _ := result.LastInsertId()
+	response := fmt.Sprintf("操作成功，影响 %d 行数据", affected)
+	if lastID > 0 {
+		response = fmt.Sprintf("操作成功，影响 %d 行数据，最后插入ID: %d", affected, lastID)
 	}
-
-	jsonBytes, _ := json.Marshal(result)
-	return mcp.NewToolResultText(string(jsonBytes)), nil
+	log.Printf("Write result: %s", response)
+	return mcp.NewToolResultText(response), nil
 }
 
 func main() {

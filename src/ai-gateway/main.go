@@ -24,7 +24,7 @@ import (
 var frontendFS embed.FS
 
 const defaultListenAddr = ":3000"
-const maxToolRounds = 4
+const maxToolRounds = 10
 
 type config struct {
 	Provider string
