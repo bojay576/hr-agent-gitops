@@ -164,7 +164,7 @@ choose_mode() {
             LLM_PROVIDER="openai"
             NEED_OLLAMA=false
 
-            read -r -p "  API URL (OpenAI 兼容格式，如 /v1/chat/completions): " api_url
+            read -r -p "  API 完整地址 (如 https://api.openai.com/v1/chat/completions): " api_url
             LLM_API_URL="${api_url}"
             read -r -p "  模型名称 (如 gpt-4o, claude-sonnet-4-6, qwen-plus): " api_model
             LLM_MODEL="${api_model}"
