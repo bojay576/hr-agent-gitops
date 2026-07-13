@@ -19,44 +19,63 @@ var db *sql.DB
 // --- 工具 1: 获取数据库 Schema ---
 // AI 需要先知道有哪些表、哪些字段，才能写出正确的 SQL
 func listSchemaHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// 1. 查所有表
 	rows, err := db.Query("SHOW TABLES")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Error listing tables: %v", err)), nil
 	}
 	defer rows.Close()
 
-	var output string
-	var tables []string
+	type columnInfo struct {
+		Field   string `json:"field"`
+		Type    string `json:"type"`
+		Null    string `json:"null"`
+		Key     string `json:"key"`
+		Default string `json:"default"`
+		Extra   string `json:"extra"`
+	}
+	type tableInfo struct {
+		TableName string       `json:"table_name"`
+		Columns   []columnInfo `json:"columns"`
+	}
+	var schema []tableInfo
 
 	for rows.Next() {
 		var tableName string
 		if err := rows.Scan(&tableName); err != nil {
 			continue
 		}
-		tables = append(tables, tableName)
-	}
 
-	// 2. 查每个表的字段结构
-	for _, tableName := range tables {
-		output += fmt.Sprintf("Table: %s\n", tableName)
 		cols, err := db.Query(fmt.Sprintf("DESCRIBE %s", tableName))
 		if err != nil {
 			continue
 		}
-		
-		output += "Columns:\n"
+
+		var columns []columnInfo
 		for cols.Next() {
-			var field, type_ string
+			var col columnInfo
 			var null, key, default_, extra sql.NullString
-			cols.Scan(&field, &type_, &null, &key, &default_, &extra)
-			output += fmt.Sprintf(" - %s (%s)\n", field, type_)
+			if err := cols.Scan(&col.Field, &col.Type, &null, &key, &default_, &extra); err != nil {
+				continue
+			}
+			if null.Valid { col.Null = null.String }
+			if key.Valid { col.Key = key.String }
+			if default_.Valid { col.Default = default_.String }
+			if extra.Valid { col.Extra = extra.String }
+			columns = append(columns, col)
 		}
 		cols.Close()
-		output += "\n"
+
+		schema = append(schema, tableInfo{
+			TableName: tableName,
+			Columns:   columns,
+		})
 	}
 
-	return mcp.NewToolResultText(output), nil
+	jsonBytes, err := json.MarshalIndent(schema, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Error marshaling schema: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(jsonBytes)), nil
 }
 
 // --- 工具 2: 执行 SQL 查询 ---
