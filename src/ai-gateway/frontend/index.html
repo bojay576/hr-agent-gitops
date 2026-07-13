@@ -153,8 +153,9 @@
   const inputEl = el('input');
   const sendBtn = el('send');
 
-  // ---- 简易 Markdown 渲染 ----
+  // ---- Markdown 渲染 ----
   function renderMarkdown(text) {
+    // 先转义 HTML
     let html = text
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -170,24 +171,68 @@
     // 加粗
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
 
-    // 表格
-    html = html.replace(/^\|(.+)\|$/gm, (line) => {
-      const cells = line.slice(1, -1).split('|').map(c => c.trim());
-      // 忽略分隔行
-      if (cells.every(c => /^-+$/.test(c))) return '';
-      const tag = line.startsWith('|') ? '<tr>' : '';
-      return `${tag}${cells.map(c => `<td>${c}</td>`).join('')}</tr>`;
-    });
-    html = html.replace(/<tr>([\s\S]*?)<\/tr>/g, (m, c) => {
-      if (!window._tableOpen) { window._tableOpen = true; return `<table><thead><tr>${c.replace(/<td>/g, '<th>').replace(/<\/td>/g, '</th>')}</tr></thead><tbody>`; }
-      return m;
-    });
-    html = html.replace(/(<\/tbody><\/table>)?\n*$/g, (m) => {
-      if (window._tableOpen) { window._tableOpen = false; return '</tbody></table>'; }
-      return m;
-    });
+    // 表格（在处理换行之前处理，避免 <br> 干扰）
+    const lines = html.split('\n');
+    const result = [];
+    let inTable = false;
 
-    // 换行
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // 检测表格行：以 | 开头和结尾
+      if (/^\|.+\|$/.test(line.trim())) {
+        const cells = line.trim().slice(1, -1).split('|').map(c => c.trim());
+
+        // 分隔行（|---|---|），跳过
+        if (cells.every(c => /^-+$/.test(c))) {
+          if (inTable) {
+            // 结束表头，开始表体
+            result.push('</thead><tbody>');
+          }
+          continue;
+        }
+
+        if (!inTable) {
+          // 第一行作为表头
+          result.push('<table><thead><tr>');
+          cells.forEach(c => result.push(`<th>${c}</th>`));
+          result.push('</tr></thead><tbody>');
+          inTable = true;
+        } else {
+          // 后续行作为数据行
+          result.push('<tr>');
+          cells.forEach(c => result.push(`<td>${c}</td>`));
+          result.push('</tr>');
+        }
+        continue;
+      }
+
+      // 非表格行：如果之前在表格里，关闭表格
+      if (inTable) {
+        result.push('</tbody></table>');
+        inTable = false;
+      }
+
+      // 处理标题（## xxx）
+      if (/^#{1,3}\s/.test(line)) {
+        const level = line.match(/^#+/)[0].length;
+        const title = line.replace(/^#+\s*/, '');
+        result.push(`<h${level}>${title}</h${level}>`);
+        continue;
+      }
+
+      result.push(line);
+    }
+
+    // 如果文档以表格结尾，关闭它
+    if (inTable) {
+      result.push('</tbody></table>');
+    }
+
+    html = result.join('\n');
+
+    // 换行 -> <br>（不在表格或代码块内）
+    // 简单处理：用 <br> 替换行尾的 \n（但不破坏表格）
     html = html.replace(/\n/g, '<br>');
 
     return html;

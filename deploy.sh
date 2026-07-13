@@ -184,7 +184,68 @@ choose_mode() {
     esac
 }
 
-# ---- 3.5 健康检查：验证 API 连通性 ----
+# ---- 3.6 配置数据库连接 ----
+configure_database() {
+    step "配置数据库"
+
+    echo "  选择要连接的数据库:"
+    echo "    [1] 使用内置 HR 演示数据库（默认）"
+    echo "        DSN: root:native@tcp(mysql-service:3306)/hr_db"
+    echo "        集群内部署的 MySQL，包含部门和员工示例数据"
+    echo "    [2] 连接外部 MySQL 数据库"
+    echo "        连接到您自己的 MySQL 实例"
+    echo ""
+    read -r -p "  请选择 [1-2] (默认 1): " db_choice
+    db_choice="${db_choice:-1}"
+
+    case "$db_choice" in
+        1)
+            DB_DSN="root:native@tcp(mysql-service:3306)/hr_db"
+            NEED_MYSQL=true
+            info "数据库: 内置 HR 演示数据库"
+            ;;
+        2)
+            NEED_MYSQL=false
+            echo ""
+            echo "  请输入外部 MySQL 连接信息："
+            read -r -p "  主机地址 (如 192.168.1.100): " db_host
+            read -r -p "  端口 (默认 3306): " db_port
+            db_port="${db_port:-3306}"
+            read -r -p "  数据库名: " db_name
+            read -r -p "  用户名: " db_user
+            read -r -sp "  密码: " db_pass
+            echo ""
+
+            if [ -z "$db_host" ] || [ -z "$db_name" ] || [ -z "$db_user" ]; then
+                err "主机、数据库名、用户名为必填项"
+                exit 1
+            fi
+
+            DB_DSN="${db_user}:${db_pass}@tcp(${db_host}:${db_port})/${db_name}"
+
+            # 测试连接
+            info "测试数据库连接..."
+            if command -v mysql &>/dev/null; then
+                if mysql -h "$db_host" -P "$db_port" -u "$db_user" -p"$db_pass" "$db_name" -e "SELECT 1" &>/dev/null; then
+                    info "数据库连接成功 ✓"
+                else
+                    warn "无法连接数据库，请检查信息是否正确"
+                    read -r -p "  是否继续部署？(y/N): " continue_choice
+                    if [ "${continue_choice}" != "y" ] && [ "${continue_choice}" != "Y" ]; then
+                        exit 0
+                    fi
+                fi
+            else
+                info "未安装 mysql 客户端，跳过连接测试（部署后 MCP Server 会验证连接）"
+            fi
+            info "数据库: 外部 MySQL (${db_user}@${db_host}:${db_port}/${db_name})"
+            ;;
+        *)
+            err "无效选择"
+            exit 1
+            ;;
+    esac
+}
 check_api_health() {
     if [ "${DEPLOY_MODE}" != "api" ] || [ -z "${LLM_API_URL}" ]; then
         return
@@ -358,8 +419,18 @@ do_deploy() {
 
     # 5b. 创建 Secrets 先
     info "创建 Secrets..."
-    apply_manifest "${SCRIPT_DIR}/apps/mysql/mysql-secret.yaml"
-    apply_manifest "${SCRIPT_DIR}/apps/mcp-agent/server-secret.yaml"
+
+    # MySQL 密码 Secret（仅内置数据库需要）
+    if [ "${NEED_MYSQL}" = "true" ]; then
+        apply_manifest "${SCRIPT_DIR}/apps/mysql/mysql-secret.yaml"
+    fi
+
+    # MCP Server 数据库连接 Secret（动态生成，使用用户配置的 DSN）
+    info "创建 MCP Server 数据库连接 Secret..."
+    kubectl create secret generic mcp-server-secret \
+        --from-literal=dsn="${DB_DSN}" \
+        -n "${NAMESPACE}" \
+        --dry-run=client -o yaml | kubectl apply -f -
 
     # Gateway Secret (API Key)
     if [ "${DEPLOY_MODE}" = "api" ] && [ -n "${LLM_API_KEY:-}" ]; then
@@ -385,9 +456,13 @@ do_deploy() {
         # 编辑 apps/ollama/ollama.yaml 取消 imagePullSecrets 注释并替换镜像地址
     fi
 
-    # 5d. 部署 MySQL
-    info "部署 MySQL..."
-    apply_manifest "${SCRIPT_DIR}/apps/mysql/mysql-deployment.yaml"
+    # 5d. 部署 MySQL（仅在需要内置数据库时部署）
+    if [ "${NEED_MYSQL}" = "true" ]; then
+        info "部署 MySQL..."
+        apply_manifest "${SCRIPT_DIR}/apps/mysql/mysql-deployment.yaml"
+    else
+        info "使用外部数据库，跳过 MySQL 部署"
+    fi
 
     # 5e. 部署 MCP Server
     info "部署 MCP Server..."
@@ -416,7 +491,8 @@ wait_ready() {
 
     local deployments=()
     [ "${NEED_OLLAMA}" = "true" ] && deployments+=("deploy/ollama")
-    deployments+=("deploy/mysql" "deploy/mcp-hr-server" "deploy/ai-gateway")
+    [ "${NEED_MYSQL}" = "true" ] && deployments+=("deploy/mysql")
+    deployments+=("deploy/mcp-hr-server" "deploy/ai-gateway")
 
     for dep in "${deployments[@]}"; do
         local dep_ns="${NAMESPACE}"
@@ -509,6 +585,7 @@ main() {
     check_prerequisites
     ensure_storage
     choose_mode
+    configure_database
     prepare_images
     do_deploy
     wait_ready
